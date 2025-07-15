@@ -1,0 +1,99 @@
+
+#include <ESP8266WiFi.h>
+#include <WiFiClientSecure.h>
+#include <WiFiManager.h>
+#include <ArduinoJson.h>
+#include <Stepper.h>
+
+// API details
+const char* host = "ping.pingnal.com";
+const int httpsPort = 443;
+const char* path = "/ping/ba59cb1a-1595-49bd-bf6e-caa3270d9a1e";
+const char* apiKey = "ping_2diy9psei7249u9e7fsdcl";
+
+// Rain sensor and stepper motor
+const int rainSensorPin = D4;
+const int stepsPerRevolution = 2048;
+Stepper myStepper(stepsPerRevolution, D1, D3, D2, D6);  // IN1-IN4 → D1,D3,D2,D6
+
+bool isRaining = false;
+bool lastRainState = false;
+bool isClothesProtected = false;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(rainSensorPin, INPUT);
+  myStepper.setSpeed(10);  // 10 RPM
+
+  // WiFiManager to handle dynamic WiFi
+  WiFiManager wm;
+  wm.resetSettings();  // Add this line to always trigger portal
+  bool connected = wm.autoConnect("ClothesProtector", "12345678");
+
+  if (!connected) {
+    Serial.println("Failed to connect to WiFi. Rebooting...");
+    delay(3000);
+    ESP.restart();
+  }
+  Serial.println("Connected to WiFi!");
+
+  isClothesProtected = false;
+}
+
+void loop() {
+  isRaining = digitalRead(rainSensorPin) == LOW;
+
+  if (isRaining != lastRainState) {
+    if (isRaining && !isClothesProtected) {
+      Serial.println("Rain detected! Rotating 90° CW to protect clothes...");
+      myStepper.step(stepsPerRevolution / 4);  // 90 degrees clockwise
+      isClothesProtected = true;
+      sendRainMessage(true);
+    } 
+    else if (!isRaining && isClothesProtected) {
+      Serial.println("Rain stopped! Rotating 90° CCW to dry clothes...");
+      myStepper.step(-stepsPerRevolution / 4); // 90 degrees counterclockwise
+      isClothesProtected = false;
+      sendRainMessage(false);
+    }
+    lastRainState = isRaining;
+  }
+
+  delay(2000);
+}
+
+void sendRainMessage(bool raining) {
+  WiFiClientSecure client;
+  client.setInsecure();  // For dev use only, skips certificate validation
+
+  if (!client.connect(host, httpsPort)) {
+    Serial.println("Connection to server failed.");
+    return;
+  }
+
+  StaticJsonDocument<200> doc;
+  if (raining) {
+    doc["message from rain detector"] = "It is raining, clothes protected.";
+  } else {
+    doc["message from rain detector"] = "It stopped raining, drying the clothes again.";
+  }
+
+  String payload;
+  serializeJson(doc, payload);
+
+  String request = String("POST ") + path + " HTTP/1.1\r\n" + "Host: " + host + "\r\n" + "Content-Type: application/json\r\n" + "X-API-KEY: " + apiKey + "\r\n" + "Content-Length: " + payload.length() + "\r\n" + "Connection: close\r\n\r\n" + payload;
+
+  client.print(request);
+
+  Serial.println("Sent message:");
+  Serial.println(payload);
+
+  while (client.connected()) {
+    String line = client.readStringUntil('\n');
+    if (line == "\r") break;
+  }
+
+  String response = client.readString();
+  Serial.println("Server response:");
+  Serial.println(response);
+}

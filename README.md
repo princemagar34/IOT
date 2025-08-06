@@ -1,6 +1,6 @@
 #RAIN SAFE HANGER 
 
-##📌 About This Project
+📌 About This Project
 
 The Rain Safe Hanger is an IoT-based automated system that uses an ESP8266 microcontroller, raindrop sensor, and stepper motor to automatically rotate clothes hangers to a protected position when rain is detected, while sending real-time Telegram notifications to users.
 
